@@ -110,14 +110,22 @@ legend('speed profile')
 % Calculate total lap time
 t_s = calculateLapTime(path, U_x);
 
-Update path
+% Update path
 N = length(path.s);
 for i = 1:N-1
     Ts = t_s(i+1) - t_s(i);
-    a33 = -(car.a^2*car.C_f+car.b^2*car.C_r)/(U_x(i)*car.I);
-    a34 = (car.b*car.C_r-car.a*car.C_f)/car.I;
-    a43 = (car.b*car.C_r-car.a*car.C_f)/(car.m*U_x(i)^2)-1;
-    a44 = -(car.C_f+car.C_r)/(car.m*U_x(i));
+    
+    F_y_f_tilda = car.m*car.b/(car.a+car.b)*U_x(i)^2*path.K(i);
+    F_y_r_tilda = car.m*car.a/(car.a+car.b)*U_x(i)^2*path.K(i);
+    alpha_f_tilda = alpha_f_tilda_func(F_y_f_tilda);
+    alpha_r_tilda = alpha_r_tilda_func(F_y_r_tilda);
+    C_f_tilda = C_f_tilda_func(alpha_f_tilda);
+    C_r_tilda = C_r_tilda_func(alpha_r_tilda);
+    
+    a33 = -(car.a^2*C_f_tilda + car.b^2*C_r_tilda) / (U_x(i)*car.I);
+    a34 = (car.b*C_r_tilda - car.a*C_f_tilda) / car.I;
+    a43 = (car.b*C_r_tilda - car.a*C_f_tilda) / (car.m*U_x(i)^2) - 1;
+    a44 = -(C_f_tilda + C_r_tilda) / (car.m*U_x(i));
     
     A = [0 U_x(i) 0 U_x(i) 0; ...
          0 0 1 0 0; ...
@@ -126,16 +134,13 @@ for i = 1:N-1
          0 0 1 0 0];
     B = [0; ...
          0; ...
-         car.a*car.C_f/car.I; ...
-         car.C_f/(car.m*U_x(i)); ...
-         0];
-    a_f = 0;
-    a_r = 0;
-    F_y_f = car.b/(car.a+car.b)*U_x(i)^2*path.K(i);
-    F_y_r = car.a/(car.a+car.b)*U_x(i)^2*path.K(i);
+         car.a*C_f_tilda/car.I; ...
+         C_f_tilda/(car.m*U_x(i)); ...
+         0]; 
+    
     d2 = -path.K(i)*U_x(i);
-    d3 = (car.a*car.C_f*a_f - car.b*car.C_r*a_r + car.a*F_y_f - car.b*F_y_r)/car.I;
-    d4 = (car.C_f*a_f + car.C_r*a_r + F_y_f + F_y_r)/(car.m*U_x(i));
+    d3 = (car.a*C_f_tilda*alpha_f_tilda - car.b*C_r_tilda*alpha_r_tilda + car.a*F_y_f_tilda - car.b*F_y_r_tilda) / car.I;
+    d4 = (C_f_tilda*alpha_f_tilda + C_r_tilda*alpha_r_tilda + F_y_f_tilda + F_y_r_tilda) / (car.m*U_x(i));
     
     d_k = Ts*[0; ...
             d2; ...
