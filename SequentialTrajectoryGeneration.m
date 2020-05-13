@@ -223,8 +223,13 @@ end
 
 A_in = cell2mat(A_in_cell);
 b_in = cell2mat(b_in_cell);
-%%
+
+clear H_sr H_sr_cell A_in_cell b_in_cell A_eq_cell b_eq_cell
+
+% Solve convex optimiztion problem
+tic
 X_star = quadprog(2*H, [], A_in, b_in, A_eq, b_eq);
+toc
 
 %% Function Definitions
 function U_x = calculateSpeedProfile(path, car)
