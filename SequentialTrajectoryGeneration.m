@@ -9,7 +9,7 @@ global mu g
 mu = 1.0;
 g = 9.81;
 
-s_window = 60; % moving average window
+s_window = 50; % moving average window
 ds = 5;
 s = 0:ds:Track.arc_s(end-1);
 K = movingAverage(Track.fdtheta(s), int32(s_window/ds));
@@ -105,14 +105,56 @@ plot(path.s, U_x, 'k', 'LineWidth', 1.5);
 grid on;
 xlim([-inf inf]); ylim([0, 80]);
 xlabel('$s$ [m]'); ylabel('$v$ [m/s]');
-legend('speed profile')
+title('speed profile')
 
 % Calculate total lap time
 t_s = calculateLapTime(path, U_x);
 
 % Update path
 N = length(path.s);
+A_eq_cell = cell(N,N);
+b_eq_cell = cell(N,1);
+A_in_cell = cell(N,N);
+b_in_cell = cell(N,1);
+H_sr_cell = cell(N-1,N);
+
+theta0 = Track.ftheta(0);
+
+% Initialize cells
+for i = 1:N
+    for j = 1:N
+        A_eq_cell{i,j} = zeros(5,6);
+        A_in_cell{i,j} = zeros(2,6);
+    end
+    b_eq_cell{i,1} = zeros(6,1);
+    b_in_cell{i,1} = zeros(2,1);
+end
+
 for i = 1:N-1
+    for j = 1:N
+        H_sr_cell{i, j} = zeros(1,6);
+    end
+end
+
+% Construct cost function
+for i = 1:N-1
+    fprintf('      cost: i = %5d\n', i);
+    lambda = 1;
+    ds = path.s(i+1) - path.s(i);
+    
+    H_k = [0, 0, 0, 0, 1/ds, sqrt(lambda)];
+    
+    H_sr_cell{i,i} = -H_k;
+    H_sr_cell{i,i+1} = H_k;
+end
+
+H_sr = cell2mat(H_sr_cell);
+H = H_sr'*H_sr;
+
+% Construct equality constraints 15b
+for i = 1:N-1
+    fprintf('  equality: i = %5d\n', i);
+    
     Ts = t_s(i+1) - t_s(i);
     
     F_y_f_tilda = car.m*car.b/(car.a+car.b)*U_x(i)^2*path.K(i);
@@ -150,7 +192,39 @@ for i = 1:N-1
     C = [1 0 0 0 0];
     D = 0;
     [A_k, B_k, ~, ~] = c2dm(A, B, C, D, Ts);
+    
+    
+    A_eq_cell{i,i} = [eye(5), zeros(5,1)];
+    if i == 1
+        b_eq_cell{i,1} = [0; 0; 0; 0; theta0];
+    else
+        A_eq_cell{i-1,i} = -[A_k, B_k];
+        b_eq_cell{i,1} = d_k;
+    end
+    
 end
+
+% 15d
+A_eq_cell{N,N} = -[eye(5) zeros(5,1)];
+A_eq_cell{N,1} = [eye(5) zeros(5,1)];
+b_eq_cell{N,1} = zeros(5,1);
+
+A_eq = cell2mat(A_eq_cell);
+b_eq = cell2mat(b_eq_cell);
+
+% Construct inequality contraints 15c
+C = [1 0 0 0 0];
+for i = 1:N
+    fprintf('inequality: i = %5d\n', i);
+    
+    A_in_cell{i,i} = [C 0; -C 0];
+    b_in_cell{i,1} = [w_r(i); -w_l(i)];
+end
+
+A_in = cell2mat(A_in_cell);
+b_in = cell2mat(b_in_cell);
+%%
+X_star = quadprog(2*H, [], A_in, b_in, A_eq, b_eq);
 
 %% Function Definitions
 function U_x = calculateSpeedProfile(path, car)
@@ -158,7 +232,7 @@ function U_x = calculateSpeedProfile(path, car)
     U_x_max = 75;
     
     % 1st pass
-    U_x_1 = sqrt(0.9*mu*g./abs(path.K));
+    U_x_1 = sqrt(0.85*mu*g./abs(path.K));
     for i = 1:length(U_x_1)
         U_x_1(i) = min(U_x_max, U_x_1(i));
     end
@@ -166,7 +240,8 @@ function U_x = calculateSpeedProfile(path, car)
     U_x_2 = U_x_1;
     for i = 1:length(U_x_2)-1       
         ds = path.s(i+1) - path.s(i);
-        U_x_2(i+1) = sqrt(U_x_2(i)^2 + 2*(car.F_max/car.m)*ds);
+        F_max = car.F_max - 0.5*car.C_d*car.rho*car.A*U_x_2(i);
+        U_x_2(i+1) = sqrt(U_x_2(i)^2 + 2*(F_max/car.m)*ds);
         U_x_2(i+1) = min(U_x_2(i+1), U_x_1(i+1));
     end
     % 3rd pass
