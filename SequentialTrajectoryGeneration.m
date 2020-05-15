@@ -184,11 +184,11 @@ for i = 1:N-1
     d3 = (car.a*C_f_tilda*alpha_f_tilda - car.b*C_r_tilda*alpha_r_tilda + car.a*F_y_f_tilda - car.b*F_y_r_tilda) / car.I;
     d4 = (C_f_tilda*alpha_f_tilda + C_r_tilda*alpha_r_tilda + F_y_f_tilda + F_y_r_tilda) / (car.m*U_x(i));
     
-    d_k = Ts*[0; ...
-            d2; ...
-            d3; ...
-            d4; ...
-            0];
+    d_k = [0; ...
+           d2; ...
+           d3; ...
+           d4; ...
+           0];
     C = [1 0 0 0 0];
     D = 0;
     [A_k, B_k, ~, ~] = c2dm(A, B, C, D, Ts);
@@ -198,7 +198,7 @@ for i = 1:N-1
     if i == 1
         b_eq_cell{i,1} = [0; 0; 0; 0; theta0];
     else
-        A_eq_cell{i-1,i} = -[A_k, B_k];
+        A_eq_cell{i,i-1} = -[A_k, B_k];
         b_eq_cell{i,1} = d_k;
     end
     
@@ -224,12 +224,36 @@ end
 A_in = cell2mat(A_in_cell);
 b_in = cell2mat(b_in_cell);
 
-clear H_sr H_sr_cell A_in_cell b_in_cell A_eq_cell b_eq_cell
+clear H_sr_cell A_in_cell b_in_cell A_eq_cell b_eq_cell
 
-% Solve convex optimiztion problem
+% Solve the convex optimiztion problem using MATLAB quadprog
 tic
-X_star = quadprog(2*H, [], A_in, b_in, A_eq, b_eq);
+x_star_m = quadprog(2*H, [], A_in, b_in, A_eq, b_eq);
 toc
+
+%% Solve the convex optimization problem using CVX
+tic
+n = size(H_sr,2);
+cvx_begin
+    variable x_star_cvx(n);
+    minimize( 1/sqrt(2)*norm(H_sr*x_star_cvx,2) )
+    subject to
+        A_eq*x_star_cvx == b_eq
+        A_in*x_star_cvx <= b_in
+cvx_end
+toc
+
+%% Retreive the original states
+
+x_aug_m = reshape(x_star_m, 6, length(x_star_m)/6);
+x_aug_cvx = reshape(x_star_cvx, 6, length(x_star_cvx)/6);
+
+x_m = x_aug_m(1:5,:);
+u_m = x_aug_m(6,:);
+x_cvx = x_aug_cvx(1:5,:);
+u_cvx = x_aug_cvx(6,:);
+
+
 
 %% Function Definitions
 function U_x = calculateSpeedProfile(path, car)
