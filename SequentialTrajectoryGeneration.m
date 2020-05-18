@@ -10,17 +10,20 @@ mu = 1.0;
 g = 9.81;
 
 s_window = 50; % moving average window
-ds = 5;
-s = 0:ds:Track.arc_s(end-1);
+ds = 2.75;
+s = 0:ds:Track.arc_s(end-10);
 K = movingAverage(Track.fdtheta(s), int32(s_window/ds));
+psi_r = movingAverage(Track.ftheta(s), int32(s_window/ds));
+cline = Track.center(s);
+
 
 e_r = Track.center(s) - Track.fun_br(s);
 e_l = Track.center(s) - Track.fun_bl(s);
 w_r = zeros(size(s));
 w_l = zeros(size(s));
 for i = 1:length(s)
-    w_r(i) = norm(e_r(1:2,i));
-    w_l(i) = -norm(e_l(1:2,i));
+    w_r(i) = norm(e_r(1:2,i))-0.5;
+    w_l(i) = -norm(e_l(1:2,i))+0.5;
 end
 
 w_r = movingAverage(w_r, int32(s_window/ds));
@@ -112,8 +115,8 @@ t_s = calculateLapTime(path, U_x);
 
 % Update path
 N = length(path.s);
-A_eq_cell = cell(N,N);
-b_eq_cell = cell(N,1);
+A_eq_cell = cell(N-1,N);
+b_eq_cell = cell(N-1,1);
 A_in_cell = cell(N,N);
 b_in_cell = cell(N,1);
 H_sr_cell = cell(N-1,N);
@@ -123,23 +126,25 @@ theta0 = Track.ftheta(0);
 % Initialize cells
 for i = 1:N
     for j = 1:N
-        A_eq_cell{i,j} = zeros(5,6);
+%         A_eq_cell{i,j} = zeros(5,6);
         A_in_cell{i,j} = zeros(2,6);
     end
-    b_eq_cell{i,1} = zeros(6,1);
+%     b_eq_cell{i,1} = zeros(6,1);
     b_in_cell{i,1} = zeros(2,1);
 end
 
 for i = 1:N-1
     for j = 1:N
         H_sr_cell{i, j} = zeros(1,6);
+        A_eq_cell{i,j} = zeros(5,6);
     end
+    b_eq_cell{i,1} = zeros(6,1);
 end
 
 % Construct cost function
 for i = 1:N-1
     fprintf('      cost: i = %5d\n', i);
-    lambda = 1;
+    lambda = 0.001;
     ds = path.s(i+1) - path.s(i);
     
     H_k = [0, 0, 0, 0, 1/ds, sqrt(lambda)];
@@ -149,13 +154,11 @@ for i = 1:N-1
 end
 
 H_sr = cell2mat(H_sr_cell);
-H = H_sr'*H_sr;
 
 % Construct equality constraints 15b
 for i = 1:N-1
-    fprintf('  equality: i = %5d\n', i);
-    
     Ts = t_s(i+1) - t_s(i);
+    fprintf('  equality: i = %5d, Ts = %.3f\n', i, Ts);
     
     F_y_f_tilda = car.m*car.b/(car.a+car.b)*U_x(i)^2*path.K(i);
     F_y_r_tilda = car.m*car.a/(car.a+car.b)*U_x(i)^2*path.K(i);
@@ -205,13 +208,13 @@ for i = 1:N-1
 end
 
 % 15d
-A_eq_cell{N,N} = -[eye(5) zeros(5,1)];
-A_eq_cell{N,1} = [eye(5) zeros(5,1)];
-b_eq_cell{N,1} = zeros(5,1);
+% A_eq_cell{N,N} = -[eye(5) zeros(5,1)];
+% A_eq_cell{N,1} = [eye(5) zeros(5,1)];
+% b_eq_cell{N,1} = zeros(5,1);
 
 A_eq = cell2mat(A_eq_cell);
 b_eq = cell2mat(b_eq_cell);
-
+%%
 % Construct inequality contraints 15c
 C = [1 0 0 0 0];
 for i = 1:N
@@ -226,32 +229,52 @@ b_in = cell2mat(b_in_cell);
 
 clear H_sr_cell A_in_cell b_in_cell A_eq_cell b_eq_cell
 
-% Solve the convex optimiztion problem using MATLAB quadprog
-tic
-x_star_m = quadprog(2*H, [], A_in, b_in, A_eq, b_eq);
-toc
-
-%% Solve the convex optimization problem using CVX
+% Solve the convex optimization problem using CVX
 tic
 n = size(H_sr,2);
 cvx_begin
-    variable x_star_cvx(n);
-    minimize( 1/sqrt(2)*norm(H_sr*x_star_cvx,2) )
+    variable x_aug_star(n);
+    minimize( 1/sqrt(2)*norm(H_sr*x_aug_star,2) )
     subject to
-        A_eq*x_star_cvx == b_eq
-        A_in*x_star_cvx <= b_in
+        A_eq*x_aug_star == b_eq
+        A_in*x_aug_star <= b_in
 cvx_end
 toc
 
-%% Retreive the original states
+% Retreive the original states
+x_aug_star = reshape(x_aug_star, 6, length(x_aug_star)/6);
 
-x_aug_m = reshape(x_star_m, 6, length(x_star_m)/6);
-x_aug_cvx = reshape(x_star_cvx, 6, length(x_star_cvx)/6);
+e_star = x_aug_star(1,:);
+delta_psi_star = x_aug_star(2,:);
+omega_star = x_aug_star(3,:);
+beta_star = x_aug_star(4,:);
+psi_star = x_aug_star(5,:);
+gamma_star = x_aug_star(6,:);
 
-x_m = x_aug_m(1:5,:);
-u_m = x_aug_m(6,:);
-x_cvx = x_aug_cvx(1:5,:);
-u_cvx = x_aug_cvx(6,:);
+%% update path 
+E = cline(1,:) - e_star.*sin(psi_r);
+N = cline(2,:) + e_star.*cos(psi_r);
+
+figure(4)
+clf; hold on
+plot(Track.bl(1,:), Track.bl(2,:), '-.k', ...
+     Track.br(1,:), Track.br(2,:), '-.k', ...
+     'MarkerSize', 0.4, 'LineWidth', 0.4);
+plot(Track.cline(1,:), Track.cline(2,:), '-.k',...
+     'MarkerSize', 0.4, 'LineWidth', 0.4)
+plot(E, N, 'LineWidth', 1.2)
+axis square
+xlabel('$E$ [m]'); ylabel('$N$ [m]');
+title('Track')
+
+figure(5)
+subplot(3,1,1)
+plot(path.s, e_star, 'LineWidth', 1.5);
+subplot(3,1,2)
+plot(path.s, delta_psi_star, 'LineWidth', 1.5);
+subplot(3,1,3)
+plot(path.s, gamma_star, ...
+     path.s, path.K, 'LineWidth', 1.5);
 
 
 
