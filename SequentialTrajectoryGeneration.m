@@ -2,16 +2,16 @@ close all; clear; clc;
 
 % Load track and vehicle data
 load('CircuitOfAmerica.mat');
-load('VehicleData.mat');
+load('VehicleDataAudiTTS.mat');
 path_ori = preprocessTrack(Track);
 
 %% Extract path information
 global mu g
-mu = 1.0;
+mu = 0.95;
 g = 9.81;
 
 ds = 5;
-path.s = 0:ds:5500;
+path.s = 0:ds:5510;
 path.K = path_ori.func_dtheta(path.s);
 path.psi = path_ori.func_theta(path.s);
 path.cline = path_ori.center(path.s);
@@ -103,26 +103,21 @@ N = length(path.s);
 fprintf('Constructing cost function ... ');
 
 % Initialize cells
-H_sr_cell = cell(2*N-2,N);
-for i = 1:2*N-2
+H_sr_cell = cell(N-1,N);
+for i = 1:N-1
     for j = 1:N
-        H_sr_cell{i, j} = zeros(1,6);
+        H_sr_cell{i, j} = zeros(2,6);
     end
 end
 
+lambda = 1;
 for i = 1:N-1
     ds = path.s(i+1) - path.s(i);
     
-    H_k = [0, 0, 0, 0, 1/ds, 0];
+    H_k = [0, 0, 0, 0, 1/ds, 0; ...
+           0, 0, 0, 0, 0, sqrt(lambda)];
     H_sr_cell{i,i} = -H_k;
     H_sr_cell{i,i+1} = H_k;
-end
-
-lambda = 0.1;
-for i = N:2*N-2
-    H_k = [0, 0, 0, 0, 0, sqrt(lambda)];
-    H_sr_cell{i,i-(N-1)} = -H_k;
-    H_sr_cell{i,i-(N-1)+1} = H_k;
 end
 fprintf('completed.\n');
 
@@ -178,15 +173,14 @@ for i = 1:N-1
     d3 = (car.a*C_f_tilda*alpha_f_tilda - car.b*C_r_tilda*alpha_r_tilda + car.a*F_y_f_tilda - car.b*F_y_r_tilda) / car.I;
     d4 = (C_f_tilda*alpha_f_tilda + C_r_tilda*alpha_r_tilda + F_y_f_tilda + F_y_r_tilda) / (car.m*U_x(i));
     
-    d_k = [0; ...
+    d_k = [ 0; ...
            d2; ...
            d3; ...
            d4; ...
-           0];
+            0]*Ts;
     C = [1 0 0 0 0];
     D = 0;
     [A_k, B_k, ~, ~] = c2dm(A, B, C, D, Ts);
-    
     
     A_eq_cell{i+1,i+1} = [eye(5), zeros(5,1)];
     A_eq_cell{i+1,i} = -[A_k, B_k];
@@ -194,7 +188,7 @@ for i = 1:N-1
 end
 
 % 15d (N+1)-th row
-A_eq_cell{N+1,N} = [eye(5), zeros(5,1)];
+A_eq_cell{N+1,N} = [diag([0 0 0 0 1]), zeros(5,1)];
 b_eq_cell{N+1,1} = [0; 0; 0; 0; path.psi(end)];
 
 A_eq = cell2mat(A_eq_cell);
@@ -210,21 +204,28 @@ A_in_cell = cell(N,N);
 b_in_cell = cell(N,1);
 for i = 1:N
     for j = 1:N
-        A_in_cell{i,j} = zeros(4,6);
+        A_in_cell{i,j} = zeros(8,6);
     end
-    b_in_cell{i,1} = zeros(4,1);
+    b_in_cell{i,1} = zeros(8,1);
 end
 
-C = [1 0 0 0 0];
-delta_max = 1000*pi/180;
+delta_max = 37*pi/180;
 delta_min = -delta_max;
 for i = 1:N
-    A_in_cell{i,i} = [          C,  0; ...
-                               -C,  0; ...
-                       zeros(1,5),  1; ...
-                       zeros(1,5), -1];
-    b_in_cell{i,1} = [ path.w_r(i)-0.5; ...
-                      -path.w_l(i)-0.5; ...
+    A_in_cell{i,i} = [ 1, 0, 0, 0, 0, 0; ...
+                      -1, 0, 0, 0, 0, 0; ...
+                       0, 0, car.a/U_x(i), 1, 0,-1; ...
+                       0, 0,-car.a/U_x(i),-1, 0, 1; ...
+                       0, 0,-car.b/U_x(i), 1, 0, 0; ...
+                       0, 0, car.b/U_x(i),-1, 0, 0; ...
+                       0, 0, 0, 0, 0, 1; ...
+                       0, 0, 0, 0, 0,-1];
+    b_in_cell{i,1} = [ path.w_r(i)-0.25; ...
+                      -path.w_l(i)-0.25; ...
+                       alpha_f_cr; ...
+                       alpha_f_cr; ...
+                       alpha_r_cr; ...
+                       alpha_r_cr; ...
                        delta_max; ...
                       -delta_min];
 end
@@ -241,8 +242,7 @@ tic
 n = size(H_sr,2);
 cvx_begin
     variable x_aug_star(n);
-    cvx_precision low
-    minimize( norm(H_sr*x_aug_star) )
+    minimize( norm(H_sr*x_aug_star,2) )
     subject to
         A_eq*x_aug_star == b_eq
         A_in*x_aug_star <= b_in
@@ -260,16 +260,16 @@ beta_star = x_aug_star(4,:);
 psi_star = x_aug_star(5,:);
 delta_star = x_aug_star(6,:);
 
-%% Update path 
+% Update path 
 E = path.cline(1,:) - e_star.*sin(path.psi);
 N = path.cline(2,:) + e_star.*cos(path.psi);
 
 figure(4)
 clf; hold on
-plot(Track.bl(1,:), Track.bl(2,:), '-.k', ...
-     Track.br(1,:), Track.br(2,:), '-.k', ...
+plot(path_ori.bl(1,:), path_ori.bl(2,:), '-.k', ...
+     path_ori.br(1,:), path_ori.br(2,:), '-.k', ...
      'MarkerSize', 0.4, 'LineWidth', 0.4);
-plot(Track.cline(1,:), Track.cline(2,:), '-.k',...
+plot(path_ori.cline(1,:), path_ori.cline(2,:), '-.k',...
      'MarkerSize', 0.4, 'LineWidth', 0.4)
 plot(E, N, 'LineWidth', 1.2)
 axis square
@@ -310,12 +310,10 @@ plot(path.s, delta_star, 'LineWidth', 1.5)
 xlim([-inf inf])
 xlabel('$s$ [m]', 'interpreter', 'latex'); ylabel('$\delta^*$ [rad]', 'interpreter', 'latex')
 
-
-
 %% Function Definitions
 function U_x = calculateSpeedProfile(path, car)
     global mu g
-    U_x_max = 75;
+    U_x_max = 60;
     
     % 1st pass
     U_x_1 = sqrt(0.85*mu*g./abs(path.K));
@@ -344,6 +342,6 @@ end
 function t_s = calculateLapTime(path, U_x) 
     t_s = zeros(size(path.s));
     for i = 2:length(t_s)
-        t_s(i) = t_s(i-1) + (path.s(i)-path.s(i-1))/(U_x(i)+U_x(i-1))*2;  
+        t_s(i) = t_s(i-1) + (path.s(i)-path.s(i-1)) / ((U_x(i)+U_x(i-1))/2);
     end
 end
