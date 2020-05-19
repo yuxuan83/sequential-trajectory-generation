@@ -3,53 +3,37 @@ close all; clear; clc;
 % Load track and vehicle data
 load('CircuitOfAmerica.mat');
 load('VehicleData.mat');
+path_ori = preprocessTrack(Track);
 
 %% Extract path information
 global mu g
 mu = 1.0;
 g = 9.81;
 
-s_window = 50; % moving average window
-ds = 2.75;
-s = 0:ds:Track.arc_s(end-10);
-K = movingAverage(Track.fdtheta(s), int32(s_window/ds));
-psi_r = movingAverage(Track.ftheta(s), int32(s_window/ds));
-cline = Track.center(s);
-
-
-e_r = Track.center(s) - Track.fun_br(s);
-e_l = Track.center(s) - Track.fun_bl(s);
-w_r = zeros(size(s));
-w_l = zeros(size(s));
-for i = 1:length(s)
-    w_r(i) = norm(e_r(1:2,i))-0.5;
-    w_l(i) = -norm(e_l(1:2,i))+0.5;
-end
-
-w_r = movingAverage(w_r, int32(s_window/ds));
-w_l = movingAverage(w_l, int32(s_window/ds));
-
-path.s = s;
-path.K = K;
-path.w_r = w_r;
-path.w_l = w_l;
+ds = 5;
+path.s = 0:ds:5500;
+path.K = path_ori.func_dtheta(path.s);
+path.psi = path_ori.func_theta(path.s);
+path.cline = path_ori.center(path.s);
+path.w_r = path_ori.func_wr(path.s);
+path.w_l = path_ori.func_wl(path.s);
 
 figure(1)
 subplot(2,1,1)
 plot(path.s, path.K, 'k', 'LineWidth', 1.5)
 grid on;
 xlim([-inf, inf]); 
-xlabel('$s$ [m]'); ylabel('$K$ [1/m]')
-legend('curvature')
+xlabel('$s$ [m]', 'interpreter', 'latex'); ylabel('$K$ [1/m]', 'interpreter', 'latex')
+legend('curvature', 'interpreter', 'latex')
 subplot(2,1,2)
-plot(path.s, 0*s, '--', ...
+plot(path.s, 0*path.s, 'b-', ...
      path.s, path.w_r, 'k', ...
      path.s, path.w_l, 'k', ...
      'LineWidth', 1.5)
 grid on;
 xlim([-inf inf]); ylim([-20 20]); 
-xlabel('$s$ [m]'); ylabel('$w$ [m]')
-legend('center line', 'right boundary', 'left boundary')
+xlabel('$s$ [m]', 'interpreter', 'latex'); ylabel('$w$ [m]', 'interpreter', 'latex')
+legend('center line', 'right boundary', 'left boundary', 'interpreter', 'latex')
 
 %% Fiala tire model table
 dalpha = 0.0001;
@@ -115,50 +99,57 @@ t_s = calculateLapTime(path, U_x);
 
 % Update path
 N = length(path.s);
-A_eq_cell = cell(N-1,N);
-b_eq_cell = cell(N-1,1);
-A_in_cell = cell(N,N);
-b_in_cell = cell(N,1);
-H_sr_cell = cell(N-1,N);
-
-theta0 = Track.ftheta(0);
+% Construct cost function
+fprintf('Constructing cost function ... ');
 
 % Initialize cells
-for i = 1:N
-    for j = 1:N
-%         A_eq_cell{i,j} = zeros(5,6);
-        A_in_cell{i,j} = zeros(2,6);
-    end
-%     b_eq_cell{i,1} = zeros(6,1);
-    b_in_cell{i,1} = zeros(2,1);
-end
-
-for i = 1:N-1
+H_sr_cell = cell(2*N-2,N);
+for i = 1:2*N-2
     for j = 1:N
         H_sr_cell{i, j} = zeros(1,6);
-        A_eq_cell{i,j} = zeros(5,6);
     end
-    b_eq_cell{i,1} = zeros(6,1);
 end
 
-% Construct cost function
 for i = 1:N-1
-    fprintf('      cost: i = %5d\n', i);
-    lambda = 0.001;
     ds = path.s(i+1) - path.s(i);
     
-    H_k = [0, 0, 0, 0, 1/ds, sqrt(lambda)];
-    
+    H_k = [0, 0, 0, 0, 1/ds, 0];
     H_sr_cell{i,i} = -H_k;
     H_sr_cell{i,i+1} = H_k;
 end
 
+lambda = 0.1;
+for i = N:2*N-2
+    H_k = [0, 0, 0, 0, 0, sqrt(lambda)];
+    H_sr_cell{i,i-(N-1)} = -H_k;
+    H_sr_cell{i,i-(N-1)+1} = H_k;
+end
+fprintf('completed.\n');
+
 H_sr = cell2mat(H_sr_cell);
+clear H_sr_cell
 
 % Construct equality constraints 15b
+fprintf('Constructing equality constraints ... ');
+
+% Initialize cells
+A_eq_cell = cell(N+1,N);
+b_eq_cell = cell(N+1,1);
+for i = 1:N+1
+    for j = 1:N
+        A_eq_cell{i,j} = zeros(5,6);
+        
+    end
+    b_eq_cell{i,1} = zeros(6,1);
+end
+
+% 1st row
+A_eq_cell{1,1} = [eye(5), zeros(5,1)];
+b_eq_cell{1,1} = [0; 0; 0; 0; path.psi(1)];
+
+% 2nd - N row
 for i = 1:N-1
     Ts = t_s(i+1) - t_s(i);
-    fprintf('  equality: i = %5d, Ts = %.3f\n', i, Ts);
     
     F_y_f_tilda = car.m*car.b/(car.a+car.b)*U_x(i)^2*path.K(i);
     F_y_r_tilda = car.m*car.a/(car.a+car.b)*U_x(i)^2*path.K(i);
@@ -197,48 +188,66 @@ for i = 1:N-1
     [A_k, B_k, ~, ~] = c2dm(A, B, C, D, Ts);
     
     
-    A_eq_cell{i,i} = [eye(5), zeros(5,1)];
-    if i == 1
-        b_eq_cell{i,1} = [0; 0; 0; 0; theta0];
-    else
-        A_eq_cell{i,i-1} = -[A_k, B_k];
-        b_eq_cell{i,1} = d_k;
-    end
-    
+    A_eq_cell{i+1,i+1} = [eye(5), zeros(5,1)];
+    A_eq_cell{i+1,i} = -[A_k, B_k];
+    b_eq_cell{i+1,1} = d_k;
 end
 
-% 15d
-% A_eq_cell{N,N} = -[eye(5) zeros(5,1)];
-% A_eq_cell{N,1} = [eye(5) zeros(5,1)];
-% b_eq_cell{N,1} = zeros(5,1);
+% 15d (N+1)-th row
+A_eq_cell{N+1,N} = [eye(5), zeros(5,1)];
+b_eq_cell{N+1,1} = [0; 0; 0; 0; path.psi(end)];
 
 A_eq = cell2mat(A_eq_cell);
 b_eq = cell2mat(b_eq_cell);
-%%
+clear A_eq_cell b_eq_cell
+fprintf('completed.\n');
+
 % Construct inequality contraints 15c
-C = [1 0 0 0 0];
+fprintf('Constructing inequality constraints ... ');
+
+% Initialize cells
+A_in_cell = cell(N,N);
+b_in_cell = cell(N,1);
 for i = 1:N
-    fprintf('inequality: i = %5d\n', i);
-    
-    A_in_cell{i,i} = [C 0; -C 0];
-    b_in_cell{i,1} = [w_r(i); -w_l(i)];
+    for j = 1:N
+        A_in_cell{i,j} = zeros(4,6);
+    end
+    b_in_cell{i,1} = zeros(4,1);
+end
+
+C = [1 0 0 0 0];
+delta_max = 1000*pi/180;
+delta_min = -delta_max;
+for i = 1:N
+    A_in_cell{i,i} = [          C,  0; ...
+                               -C,  0; ...
+                       zeros(1,5),  1; ...
+                       zeros(1,5), -1];
+    b_in_cell{i,1} = [ path.w_r(i)-0.5; ...
+                      -path.w_l(i)-0.5; ...
+                       delta_max; ...
+                      -delta_min];
 end
 
 A_in = cell2mat(A_in_cell);
 b_in = cell2mat(b_in_cell);
+clear A_in_cell b_in_cell
+fprintf('completed.\n');
 
-clear H_sr_cell A_in_cell b_in_cell A_eq_cell b_eq_cell
 
-% Solve the convex optimization problem using CVX
+%% Solve the convex optimization problem using CVX
+fprintf('Solving convex optimization problem ... ')
 tic
 n = size(H_sr,2);
 cvx_begin
     variable x_aug_star(n);
-    minimize( 1/sqrt(2)*norm(H_sr*x_aug_star,2) )
+    cvx_precision low
+    minimize( norm(H_sr*x_aug_star) )
     subject to
         A_eq*x_aug_star == b_eq
         A_in*x_aug_star <= b_in
 cvx_end
+fprintf('completed.\n');
 toc
 
 % Retreive the original states
@@ -249,11 +258,11 @@ delta_psi_star = x_aug_star(2,:);
 omega_star = x_aug_star(3,:);
 beta_star = x_aug_star(4,:);
 psi_star = x_aug_star(5,:);
-gamma_star = x_aug_star(6,:);
+delta_star = x_aug_star(6,:);
 
-%% update path 
-E = cline(1,:) - e_star.*sin(psi_r);
-N = cline(2,:) + e_star.*cos(psi_r);
+%% Update path 
+E = path.cline(1,:) - e_star.*sin(path.psi);
+N = path.cline(2,:) + e_star.*cos(path.psi);
 
 figure(4)
 clf; hold on
@@ -264,17 +273,42 @@ plot(Track.cline(1,:), Track.cline(2,:), '-.k',...
      'MarkerSize', 0.4, 'LineWidth', 0.4)
 plot(E, N, 'LineWidth', 1.2)
 axis square
-xlabel('$E$ [m]'); ylabel('$N$ [m]');
-title('Track')
+xlabel('$E$ [m]', 'interpreter', 'latex'); ylabel('$N$ [m]', 'interpreter', 'latex');
+title('Track', 'interpreter', 'latex')
 
 figure(5)
-subplot(3,1,1)
+set(gcf, 'Position', [10, 10, 1200, 800])
+subplot(6,1,1)
 plot(path.s, e_star, 'LineWidth', 1.5);
-subplot(3,1,2)
+xlim([-inf inf])
+xlabel('$s$ [m]', 'interpreter', 'latex'); ylabel('$e^*$ [m]', 'interpreter', 'latex')
+title('Lateral Errors', 'interpreter', 'latex')
+subplot(6,1,2)
 plot(path.s, delta_psi_star, 'LineWidth', 1.5);
-subplot(3,1,3)
-plot(path.s, gamma_star, ...
-     path.s, path.K, 'LineWidth', 1.5);
+xlim([-inf inf])
+xlabel('$s$ [m]', 'interpreter', 'latex'); ylabel('$\Delta\psi^*$ [rad]')
+title('Heading Angle Errors', 'interpreter', 'latex');
+subplot(6,1,3)
+plot(path.s, omega_star, 'LineWidth', 1.5);
+xlim([-inf inf])
+xlabel('$s$ [m]', 'interpreter', 'latex'); ylabel('$\dot{\psi^*}$ [rad/s]')
+title('Steering Angle', 'interpreter', 'latex')
+subplot(6,1,4)
+plot(path.s, beta_star, 'LineWidth', 1.5)
+xlim([-inf inf])
+xlabel('$s$ [m]', 'interpreter', 'latex'); ylabel('$\beta^*$ [rad]', 'interpreter', 'latex')
+title('Side Slip Angle [rad]', 'interpreter', 'latex')
+subplot(6,1,5)
+plot(path.s, psi_star, ...
+     path.s, path.psi , ...
+     'LineWidth', 1.5)
+xlim([-inf inf])
+xlabel('$s$ [m]', 'interpreter', 'latex'); ylabel('$\psi^*$ [rad]', 'interpreter', 'latex')
+title('Heading Angle', 'interpreter', 'latex')
+subplot(6,1,6)
+plot(path.s, delta_star, 'LineWidth', 1.5)
+xlim([-inf inf])
+xlabel('$s$ [m]', 'interpreter', 'latex'); ylabel('$\delta^*$ [rad]', 'interpreter', 'latex')
 
 
 

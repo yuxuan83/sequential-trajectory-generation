@@ -1,10 +1,10 @@
 function Path = preprocessTrack(Track)
     % options
-    VISUALIZE = true;
-    CAR_MAKER = true;
+    VISUALIZE = false;
+    CAR_MAKER = false;
     
     % path discretization parameters
-    s_window = 50; % moving average window
+    s_window = 30; % moving average window
     ds = 1;
     
     fun_br = @(s) [interp1(Track.arc_s, Track.br(1,:), s, 'spline');
@@ -75,8 +75,8 @@ function Path = preprocessTrack(Track)
                          interp1(Path.arc_s, Path.bl(3,:), s, 'spline')];
     Path.func_wr = @(s) interp1(Path.arc_s, Path.wr, s, 'spline');
     Path.func_wl = @(s) interp1(Path.arc_s, Path.wl, s, 'spline');
-    Path.func_theta = @(s) interp1(Path.arc, Path.theta, s, 'spline');
-    Path.func_dtheta = @(s) interp1(Path.arc, Path.dtheta, s, 'spline');
+    Path.func_theta = @(s) interp1(Path.arc_s, Path.theta, s, 'spline');
+    Path.func_dtheta = @(s) interp1(Path.arc_s, Path.dtheta, s, 'spline');
     
     % save to CarMaker road profile text file
     if CAR_MAKER == true
