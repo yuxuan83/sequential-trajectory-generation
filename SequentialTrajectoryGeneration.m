@@ -11,7 +11,7 @@ mu = 0.95;
 g = 9.81;
 
 ds = 5;
-path.s = 0:ds:5510;
+path.s = 0:ds:5520;
 path.K = path_ori.func_dtheta(path.s);
 path.psi = path_ori.func_theta(path.s);
 path.cline = path_ori.center(path.s);
@@ -188,7 +188,7 @@ for i = 1:N-1
 end
 
 % 15d (N+1)-th row
-A_eq_cell{N+1,N} = [diag([0 0 0 0 1]), zeros(5,1)];
+A_eq_cell{N+1,N} = [diag([1 0 0 0 1]), zeros(5,1)];
 b_eq_cell{N+1,1} = [0; 0; 0; 0; path.psi(end)];
 
 A_eq = cell2mat(A_eq_cell);
@@ -212,29 +212,30 @@ end
 delta_max = 37*pi/180;
 delta_min = -delta_max;
 for i = 1:N
-    A_in_cell{i,i} = [ 1, 0, 0, 0, 0, 0; ...
-                      -1, 0, 0, 0, 0, 0; ...
-                       0, 0, car.a/U_x(i), 1, 0,-1; ...
-                       0, 0,-car.a/U_x(i),-1, 0, 1; ...
-                       0, 0,-car.b/U_x(i), 1, 0, 0; ...
-                       0, 0, car.b/U_x(i),-1, 0, 0; ...
-                       0, 0, 0, 0, 0, 1; ...
-                       0, 0, 0, 0, 0,-1];
-    b_in_cell{i,1} = [ path.w_r(i)-0.25; ...
-                      -path.w_l(i)-0.25; ...
-                       alpha_f_cr; ...
-                       alpha_f_cr; ...
-                       alpha_r_cr; ...
-                       alpha_r_cr; ...
-                       delta_max; ...
-                      -delta_min];
+    G_k = [1, 0, 0, 0, 0, 0; ...
+           0, 0, car.a/U_x(i), 1, 0,-1; ...
+           0, 0,-car.b/U_x(i), 1, 0, 0; ... 
+           0, 0, 0, 0, 0, 1];
+    b_in_k_max = [path.w_r(i)-0.5; ...
+                  alpha_f_cr; ...
+                  alpha_r_cr; ...
+                  delta_max];
+    b_in_k_min = [ path.w_l(i)+0.5; ...
+                  -alpha_f_cr; ...
+                  -alpha_r_cr; ...
+                   delta_min];
+    
+    
+    A_in_cell{i,i} = [ G_k; ...
+                      -G_k];
+    b_in_cell{i,1} = [ b_in_k_max; ...
+                      -b_in_k_min];
 end
 
 A_in = cell2mat(A_in_cell);
 b_in = cell2mat(b_in_cell);
 clear A_in_cell b_in_cell
 fprintf('completed.\n');
-
 
 %% Solve the convex optimization problem using CVX
 fprintf('Solving convex optimization problem ... ')
@@ -260,43 +261,46 @@ beta_star = x_aug_star(4,:);
 psi_star = x_aug_star(5,:);
 delta_star = x_aug_star(6,:);
 
-% Update path 
-E = path.cline(1,:) - e_star.*sin(path.psi);
-N = path.cline(2,:) + e_star.*cos(path.psi);
+%% Update path 
+X = path.cline(1,:) - e_star.*sin(path.psi);
+Y = path.cline(2,:) + e_star.*cos(path.psi);
 
 figure(4)
-clf; hold on
+set(gcf, 'Units', 'Normalized', 'OuterPosition', [0 0 1 1])
+clf; hold on;
+plot(X, Y, 'r', 'LineWidth', 1.5)
 plot(path_ori.bl(1,:), path_ori.bl(2,:), '-.k', ...
      path_ori.br(1,:), path_ori.br(2,:), '-.k', ...
      'MarkerSize', 0.4, 'LineWidth', 0.4);
 plot(path_ori.cline(1,:), path_ori.cline(2,:), '-.k',...
      'MarkerSize', 0.4, 'LineWidth', 0.4)
-plot(E, N, 'LineWidth', 1.2)
-axis square
-xlabel('$E$ [m]', 'interpreter', 'latex'); ylabel('$N$ [m]', 'interpreter', 'latex');
+grid on;
+xlim([-400 1500]); ylim([-500 1400]); axis square
+xlabel('$X$ [m]', 'interpreter', 'latex'); ylabel('$Y$ [m]', 'interpreter', 'latex');
 title('Track', 'interpreter', 'latex')
+legend('Optimized Path')
 
 figure(5)
-set(gcf, 'Position', [10, 10, 1200, 800])
+set(gcf, 'Units', 'Normalized', 'OuterPosition', [0 0 1 1])
 subplot(6,1,1)
 plot(path.s, e_star, 'LineWidth', 1.5);
 xlim([-inf inf])
-xlabel('$s$ [m]', 'interpreter', 'latex'); ylabel('$e^*$ [m]', 'interpreter', 'latex')
+ylabel('$e^*$ [m]', 'interpreter', 'latex')
 title('Lateral Errors', 'interpreter', 'latex')
 subplot(6,1,2)
 plot(path.s, delta_psi_star, 'LineWidth', 1.5);
 xlim([-inf inf])
-xlabel('$s$ [m]', 'interpreter', 'latex'); ylabel('$\Delta\psi^*$ [rad]')
+ylabel('$\Delta\psi^*$ [rad]')
 title('Heading Angle Errors', 'interpreter', 'latex');
 subplot(6,1,3)
 plot(path.s, omega_star, 'LineWidth', 1.5);
 xlim([-inf inf])
-xlabel('$s$ [m]', 'interpreter', 'latex'); ylabel('$\dot{\psi^*}$ [rad/s]')
+ylabel('$\dot{\psi^*}$ [rad/s]')
 title('Steering Angle', 'interpreter', 'latex')
 subplot(6,1,4)
 plot(path.s, beta_star, 'LineWidth', 1.5)
 xlim([-inf inf])
-xlabel('$s$ [m]', 'interpreter', 'latex'); ylabel('$\beta^*$ [rad]', 'interpreter', 'latex')
+ylabel('$\beta^*$ [rad]', 'interpreter', 'latex')
 title('Side Slip Angle [rad]', 'interpreter', 'latex')
 subplot(6,1,5)
 plot(path.s, psi_star, ...
@@ -305,6 +309,7 @@ plot(path.s, psi_star, ...
 xlim([-inf inf])
 xlabel('$s$ [m]', 'interpreter', 'latex'); ylabel('$\psi^*$ [rad]', 'interpreter', 'latex')
 title('Heading Angle', 'interpreter', 'latex')
+legend('Optimized Heading Angle', 'Original Path Heading Angle', 'interpreter', 'latex')
 subplot(6,1,6)
 plot(path.s, delta_star, 'LineWidth', 1.5)
 xlim([-inf inf])
@@ -316,7 +321,7 @@ function U_x = calculateSpeedProfile(path, car)
     U_x_max = 60;
     
     % 1st pass
-    U_x_1 = sqrt(0.85*mu*g./abs(path.K));
+    U_x_1 = sqrt(0.95*mu*g./abs(path.K));
     for i = 1:length(U_x_1)
         U_x_1(i) = min(U_x_max, U_x_1(i));
     end
