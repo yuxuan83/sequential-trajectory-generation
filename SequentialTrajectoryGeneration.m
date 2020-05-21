@@ -10,7 +10,7 @@ global mu g
 mu = 0.95;
 g = 9.81;
 
-ds = 5;
+ds = 2.75;
 path.s = 0:ds:5520;
 path.K = path_ori.func_dtheta(path.s);
 path.psi = path_ori.func_theta(path.s);
@@ -81,11 +81,13 @@ xlabel('$\alpha$ [rad]'); ylabel('$F_y$ [N]');
 title('Lateral Force')
 legend('Front', 'Rear')
 
-
 %% main function loop
 
-% Update speed profile
+%% Update speed profile
+tic
+fprintf('Speed Profile Update ... ');
 U_x = calculateSpeedProfile(path, car);
+fprintf(' %.2fs\n', toc)
 
 figure(3)
 plot(path.s, U_x, 'k', 'LineWidth', 1.5);
@@ -94,56 +96,39 @@ xlim([-inf inf]); ylim([0, 80]);
 xlabel('$s$ [m]'); ylabel('$v$ [m/s]');
 title('speed profile')
 
-% Calculate total lap time
+%% Calculate total lap time
 t_s = calculateLapTime(path, U_x);
 
-% Update path
+%% Update path
+tic
+fprintf('Path Update ... ');
+
 N = length(path.s);
 % Construct cost function
-fprintf('Constructing cost function ... ');
-
-% Initialize cells
-H_sr_cell = cell(N-1,N);
-for i = 1:N-1
-    for j = 1:N
-        H_sr_cell{i, j} = zeros(2,6);
-    end
-end
-
+% initialize H_sr
 lambda = 1;
+H_sr = zeros(2*(N-1), 6*N);
 for i = 1:N-1
-    ds = path.s(i+1) - path.s(i);
+    % define current row and column indices
+    row_idx = 2*(i-1);
+    col_idx = 6*(i-1);
     
+    ds = path.s(i+1) - path.s(i);
     H_k = [0, 0, 0, 0, 1/ds, 0; ...
            0, 0, 0, 0, 0, sqrt(lambda)];
-    H_sr_cell{i,i} = -H_k;
-    H_sr_cell{i,i+1} = H_k;
+    
+    H_sr(row_idx+1:row_idx+2, col_idx+1:col_idx+6) = -H_k;
+    H_sr(row_idx+1:row_idx+2, col_idx+7:col_idx+12) = H_k;
 end
-fprintf('completed.\n');
-
-H_sr = cell2mat(H_sr_cell);
-clear H_sr_cell
 
 % Construct equality constraints 15b
-fprintf('Constructing equality constraints ... ');
+% initialize A_eq and b_eq
+A_eq = zeros(5*(N+1), 6*N);
+b_eq = zeros(5*(N+1), 1);
 
-% Initialize cells
-A_eq_cell = cell(N+1,N);
-b_eq_cell = cell(N+1,1);
-for i = 1:N+1
-    for j = 1:N
-        A_eq_cell{i,j} = zeros(5,6);
-        
-    end
-    b_eq_cell{i,1} = zeros(6,1);
-end
-
-% 1st row
-A_eq_cell{1,1} = [eye(5), zeros(5,1)];
-b_eq_cell{1,1} = [0; 0; 0; 0; path.psi(1)];
-
-% 2nd - N row
+% 1nd - N-1 row
 for i = 1:N-1
+    % construct time varying model of each step
     Ts = t_s(i+1) - t_s(i);
     
     F_y_f_tilda = car.m*car.b/(car.a+car.b)*U_x(i)^2*path.K(i);
@@ -182,32 +167,27 @@ for i = 1:N-1
     D = 0;
     [A_k, B_k, ~, ~] = c2dm(A, B, C, D, Ts);
     
-    A_eq_cell{i+1,i+1} = [eye(5), zeros(5,1)];
-    A_eq_cell{i+1,i} = -[A_k, B_k];
-    b_eq_cell{i+1,1} = d_k;
+    % define current row and column indices
+    row_idx = 5*(i-1);
+    col_idx = 6*(i-1);
+    
+    A_eq(row_idx+1:row_idx+5, col_idx+7:col_idx+12) = [eye(5), zeros(5,1)];    % block (i,i+1)
+    A_eq(row_idx+1:row_idx+5, col_idx+1:col_idx+6) = -[A_k, B_k];              % block (i,i)
+    b_eq(row_idx+1:row_idx+5, 1) = d_k;                                        % block (i,1)
 end
 
-% 15d (N+1)-th row
-A_eq_cell{N+1,N} = [diag([1 0 0 0 1]), zeros(5,1)];
-b_eq_cell{N+1,1} = [0; 0; 0; 0; path.psi(end)];
+% N-th row: initial condition
+A_eq(5*(N-1)+1:5*(N-1)+5, 1:6) = [eye(5), zeros(5,1)];                         % block (N,1)
+b_eq(5*(N-1)+1:5*(N-1)+5, 1) = [0; 0; 0; 0; path.psi(1)];                      % block (N,1)
 
-A_eq = cell2mat(A_eq_cell);
-b_eq = cell2mat(b_eq_cell);
-clear A_eq_cell b_eq_cell
-fprintf('completed.\n');
+% (N+1)-th row: final condition
+A_eq(5*N+1:5*N+5, 6*(N-1)+1:6*(N-1)+6) = [diag([1 0 1 0 1]), zeros(5,1)];      % block (N+1,N)
+b_eq(5*N+1:5*N+5, 1) = [0; 0; 0; 0; path.psi(end)];                            % block (N+1,1)
 
 % Construct inequality contraints 15c
-fprintf('Constructing inequality constraints ... ');
-
-% Initialize cells
-A_in_cell = cell(N,N);
-b_in_cell = cell(N,1);
-for i = 1:N
-    for j = 1:N
-        A_in_cell{i,j} = zeros(8,6);
-    end
-    b_in_cell{i,1} = zeros(8,1);
-end
+% initialize A_in and b_in
+A_in = zeros(8*N, 6*N);
+b_in = zeros(8*N, 1);
 
 delta_max = 37*pi/180;
 delta_min = -delta_max;
@@ -216,40 +196,34 @@ for i = 1:N
            0, 0, car.a/U_x(i), 1, 0,-1; ...
            0, 0,-car.b/U_x(i), 1, 0, 0; ... 
            0, 0, 0, 0, 0, 1];
-    b_in_k_max = [path.w_r(i)-0.5; ...
+    b_in_k_max = [path.w_r(i)-1; ...
                   alpha_f_cr; ...
                   alpha_r_cr; ...
                   delta_max];
-    b_in_k_min = [ path.w_l(i)+0.5; ...
+    b_in_k_min = [ path.w_l(i)+1; ...
                   -alpha_f_cr; ...
                   -alpha_r_cr; ...
                    delta_min];
     
-    
-    A_in_cell{i,i} = [ G_k; ...
-                      -G_k];
-    b_in_cell{i,1} = [ b_in_k_max; ...
-                      -b_in_k_min];
+    row_idx = 8*(i-1);
+    col_idx = 6*(i-1);
+    A_in(row_idx+1:row_idx+8, col_idx+1:col_idx+6) = [ G_k; ...    % block (i,i)
+                                                      -G_k];
+    b_in(row_idx+1:row_idx+8, 1) = [ b_in_k_max; ...
+                                    -b_in_k_min];                  % block (i,1)
 end
 
-A_in = cell2mat(A_in_cell);
-b_in = cell2mat(b_in_cell);
-clear A_in_cell b_in_cell
-fprintf('completed.\n');
-
-%% Solve the convex optimization problem using CVX
-fprintf('Solving convex optimization problem ... ')
-tic
+% Solve the convex optimization problem using CVX
 n = size(H_sr,2);
-cvx_begin
+cvx_begin quiet
+    cvx_precision low
     variable x_aug_star(n);
     minimize( norm(H_sr*x_aug_star,2) )
     subject to
         A_eq*x_aug_star == b_eq
         A_in*x_aug_star <= b_in
 cvx_end
-fprintf('completed.\n');
-toc
+fprintf(' %.2fs\n', toc);
 
 % Retreive the original states
 x_aug_star = reshape(x_aug_star, 6, length(x_aug_star)/6);
@@ -261,10 +235,10 @@ beta_star = x_aug_star(4,:);
 psi_star = x_aug_star(5,:);
 delta_star = x_aug_star(6,:);
 
-%% Update path 
 X = path.cline(1,:) - e_star.*sin(path.psi);
 Y = path.cline(2,:) + e_star.*cos(path.psi);
 
+%% Plot results
 figure(4)
 set(gcf, 'Units', 'Normalized', 'OuterPosition', [0 0 1 1])
 clf; hold on;
