@@ -37,7 +37,7 @@ C_f_tilda_func = @(alpha) diff_num(F_y_f_func, alpha, dalpha);
 C_r_tilda_func = @(alpha) diff_num(F_y_r_func, alpha, dalpha);
 
 %% Extract path information
-ds = 5;
+ds = 2.75;
 path.s = 0:ds:5500;
 path.K = path_ori.func_dtheta(path.s);
 path.psi = path_ori.func_theta(path.s);
@@ -46,7 +46,7 @@ path.w_r = path_ori.func_wr(path.s) - 0.8; % shrink the boudary
 path.w_l = path_ori.func_wl(path.s) + 0.8; % shrink the boudary
 
 %% main function loop
-for iter = 1:5
+for iter = 1:10
     fprintf('Iteration: %d\n', iter);
     %% Update speed profile
     tic
@@ -201,7 +201,7 @@ for iter = 1:5
         end
         path.psi(i) = psi_temp;
     end
-    path.psi = movingAverage(path.psi, 6);
+    path.psi = movingAverage(path.psi, int32(30/ds));
     
     
     for i = 1:length(path.s)-1
@@ -216,6 +216,10 @@ for iter = 1:5
     end
     fprintf('%.2fs\n', toc)
 
+    if (iter > 1 && Result{iter-1,3}(end) < t_s(end))
+        break;
+    end
+    
     %% Store results
     Result{iter,1} = U_x;
     Result{iter,2} = delta_star;
