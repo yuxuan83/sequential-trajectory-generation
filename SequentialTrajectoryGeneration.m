@@ -46,7 +46,7 @@ path.w_r = path_ori.func_wr(path.s) - 0.8; % shrink the boudary
 path.w_l = path_ori.func_wl(path.s) + 0.8; % shrink the boudary
 
 %% main function loop
-for iter = 1:10
+for iter = 1:5
     fprintf('Iteration: %d\n', iter);
     %% Update speed profile
     tic
@@ -190,12 +190,25 @@ for iter = 1:10
 
     path.cline(1,:) = path.cline(1,:) - e_star.*sin(path.psi);
     path.cline(2,:) = path.cline(2,:) + e_star.*cos(path.psi);
-    path.psi = psi_star;
 
+    for i = 2:length(path.s)
+        dx = path.cline(1,i) - path.cline(1,i-1);
+        dy = path.cline(2,i) - path.cline(2,i-1);
+        psi_temp = wrapToPi(atan(dy/dx));
+        
+        while(path.psi(i-1)-psi_temp > pi/2)
+            psi_temp = psi_temp + pi;
+        end
+        path.psi(i) = psi_temp;
+    end
+    path.psi = movingAverage(path.psi, 6);
+    
+    
     for i = 1:length(path.s)-1
         path.s(i+1) = path.s(i) + norm(path.cline(:,i+1)-path.cline(:,i));
         path.K(i+1) = (path.psi(i+1)-path.psi(i)) / (path.s(i+1)-path.s(i));
     end
+    path.K(end) = path.K(end-1);
 
     for i = 1:length(path.s)
         path.w_l(i) = path.w_l(i) - e_star(i);
@@ -301,6 +314,6 @@ end
 function t_s = calculateLapTime(path, U_x) 
     t_s = zeros(size(path.s));
     for i = 2:length(t_s)
-        t_s(i) = t_s(i-1) + (path.s(i)-path.s(i-1)) / ((U_x(i)+U_x(i-1))/2);
+        t_s(i) = t_s(i-1) + (path.s(i)-path.s(i-1)) / U_x(i-1);
     end
 end
