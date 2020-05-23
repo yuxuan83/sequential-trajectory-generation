@@ -37,13 +37,13 @@ C_f_tilda_func = @(alpha) diff_num(F_y_f_func, alpha, dalpha);
 C_r_tilda_func = @(alpha) diff_num(F_y_r_func, alpha, dalpha);
 
 %% Extract path information
-ds = 2.75;
+ds = 5;
 path.s = 0:ds:5500;
 path.K = path_ori.func_dtheta(path.s);
 path.psi = path_ori.func_theta(path.s);
 path.cline = path_ori.center(path.s);
-path.w_r = path_ori.func_wr(path.s) - 0.8; % shrink the boudary
-path.w_l = path_ori.func_wl(path.s) + 0.8; % shrink the boudary
+path.w_r = path_ori.func_wr(path.s) - 1; % shrink the boudary
+path.w_l = path_ori.func_wl(path.s) + 1; % shrink the boudary
 
 %% main function loop
 for iter = 1:10
@@ -52,7 +52,7 @@ for iter = 1:10
     tic
     fprintf('Speed Profile Update ... ');
     U_x = calculateSpeedProfile(path, car);
-    fprintf('%.2fs\n', toc)
+    fprintf('%5.2fs\n', toc)
 
     %% Calculate total lap time
     t_s = calculateLapTime(path, U_x);
@@ -62,7 +62,7 @@ for iter = 1:10
     N = length(path.s);
     % Construct cost function
     % initialize H_sr
-    lambda = 1;
+    lambda = (0.5)^2;
     H_sr = zeros(2*(N-1), 6*N);
     for i = 1:N-1
         % define current row and column indices
@@ -202,6 +202,7 @@ for iter = 1:10
         path.psi(i) = psi_temp;
     end
     path.psi = movingAverage(path.psi, int32(30/ds));
+    path.psi = movingAverage(path.psi, int32(30/ds));
     
     
     for i = 1:length(path.s)-1
@@ -214,8 +215,11 @@ for iter = 1:10
         path.w_l(i) = path.w_l(i) - e_star(i);
         path.w_r(i) = path.w_r(i) - e_star(i);
     end
-    fprintf('%.2fs\n', toc)
+    fprintf('%5.2fs\n', toc)
 
+    %% Calculate total lap time
+    t_s = calculateLapTime(path, U_x);
+    
     if (iter > 1 && Result{iter-1,3}(end) < t_s(end))
         break;
     end
@@ -228,7 +232,7 @@ for iter = 1:10
 end
 
 %% Print results
-    fprintf("         arc length   lap time\n");
+fprintf("         arc length   lap time\n");
 for i = 1:size(Result,1)
     t_s = Result{i,3};
     path = Result{i,4};
@@ -248,7 +252,7 @@ title('Velocity Profile', 'interpreter', 'latex')
 subplot(2,1,2)
 plot(path.s, delta_star, 'b', 'LineWidth', 1.5)
 grid on
-xlim([-inf inf]); ylim([car.gamma_min, car.gamma_max]);
+xlim([-inf inf]); ylim([-0.3, 0.3]);
 xlabel('$s$ [m]', 'interpreter', 'latex'); ylabel('$\delta$ [rad]', 'interpreter', 'latex');
 title('Steering Angle Profile', 'interpreter', 'latex')
 
@@ -289,7 +293,7 @@ legend('Optimized Path')
 %% Function Definitions
 function U_x = calculateSpeedProfile(path, car)
     global mu g
-    U_x_max = car.v_max;
+    U_x_max = 70;%car.v_max;
     
     % 1st pass
     U_x_1 = sqrt(0.95*mu*g./abs(path.K));
