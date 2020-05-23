@@ -293,7 +293,7 @@ legend('Optimized Path')
 %% Function Definitions
 function U_x = calculateSpeedProfile(path, car)
     global mu g
-    U_x_max = 70;%car.v_max;
+    U_x_max = car.v_max;
     
     % 1st pass
     U_x_1 = sqrt(0.95*mu*g./abs(path.K));
