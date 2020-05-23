@@ -232,7 +232,7 @@ for iter = 1:10
 end
 
 %% Print results
-fprintf("         arc length   lap time\n");
+fprintf("\n         arc length   lap time\n");
 for i = 1:size(Result,1)
     t_s = Result{i,3};
     path = Result{i,4};
@@ -244,13 +244,13 @@ end
 % velocity and steering angle profile
 figure(1)
 subplot(2,1,1)
-plot(path.s, U_x, 'b', 'LineWidth', 1.5);
+plot(path.s, U_x, 'r', 'LineWidth', 1.5);
 grid on;
 xlim([-inf inf]); ylim([0, 80]);
 xlabel('$s$ [m]', 'interpreter', 'latex'); ylabel('$v$ [m/s]', 'interpreter', 'latex');
 title('Velocity Profile', 'interpreter', 'latex')
 subplot(2,1,2)
-plot(path.s, delta_star, 'b', 'LineWidth', 1.5)
+plot(path.s, delta_star, 'r', 'LineWidth', 1.5)
 grid on
 xlim([-inf inf]); ylim([-0.3, 0.3]);
 xlabel('$s$ [m]', 'interpreter', 'latex'); ylabel('$\delta$ [rad]', 'interpreter', 'latex');
