@@ -1,6 +1,6 @@
 ## A Sequential Two-Step Algorithm for Fast Generation of Vehicle Racing Trajectories
 
-This project implements the sequential two-step algorithm proposed by [Nitin R. Kapania et al](https://arxiv.org/abs/1902.00606).  The optimized path is shown in the figure below:  
+This project implements the sequential two-step algorithm proposed by [Nitin R. Kapania et al](https://arxiv.org/abs/1902.00606), using the Circuit of the Americas, Austin. The optimized path is shown in the figure below:  
 
 ![result_track](figures/result_track.svg)
 
@@ -16,7 +16,10 @@ To generate the result, please run the script in MATLAB console:
 $ SequentialTrajectoryGeneration
 ```
 
-The result is store as a cell data structure with the name `Result`. Each row of `Result` represents the output from each iteration and each column stores the longitudinal velocities, steering angles, lap time, and path in order. All of the results are parameterized by the arc-length. The figures below show the optimized trajectory after three iterations.
+The results are store as a cell data structure with the name `Result`. Each row of `Result` represents the output from each iteration and each column stores the longitudinal velocities, steering angles, lap time, and path in order. All of the results are parameterized by the arc-length. The figures below show the optimized trajectory after three iterations.
 
 ![result_road](figures/result_road.svg)
 ![result_input](figures/result_input.svg)
+
+## Acknowledgments
+The project is an extension of the final project of ME542 Vehicle Dynamics at the University of Michigan. We would like to thank Professor Gabor Orosz and GSI Sanhoon Oh for teaching this course and providing the track data.
